@@ -1,0 +1,377 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <title>Tetris</title>
+        <script type="text/javascript" src="js/lib/jquery-1.7.1.js"></script>
+        <script type="text/javascript" src="js/lib/RequestAnimationFrame.js"></script>        
+        <script type="text/javascript" src="js/PlayerInput.js"></script>        
+<script type="text/javascript">
+$(function() {
+    TETRIS = {};
+    TETRIS.TILE_SIZE = 24;
+    TETRIS.ROWS = 20;
+    TETRIS.COLUMNS = 10;    
+    TETRIS.DROPRATE = 500;  // ms
+    TETRIS.WIDTH = TETRIS.TILE_SIZE * TETRIS.COLUMNS;
+    
+    var input = playerInput();
+    var canvas = document.getElementById('canvas');
+    canvas.width = TETRIS.TILE_SIZE * TETRIS.COLUMNS + 150;
+    canvas.height = TETRIS.TILE_SIZE * TETRIS.ROWS;
+    var width = canvas.width;
+    var height = canvas.height;
+    var gameOver = false;
+    var ctx = canvas.getContext('2d');
+    var lastDrop = Date.now();
+    var tiles = [];
+    var colors = [];
+    var currentTile;  // type 0-6
+    var nextTile;
+    var currentRotation;  // 0-3, 0-1, 0 depending on type
+    var tRow;
+    var tCol;
+    var field = [];
+    // Game field. Each will contain a number with tetramino color, if exists
+    for (var row=0; row<TETRIS.ROWS; row++) {
+        field[row] = [];    
+        for (var col=0; col<TETRIS.COLUMNS; col++) {
+            field[row][col] = -1;  // Empty slot
+        }
+    }
+    
+    var drawGrid = function() {
+        var c = ['#444', '#555'];
+        ctx.strokeStyle = '#000';
+        for (var row=0; row<TETRIS.ROWS; row++) {
+            for (var col=0; col<TETRIS.COLUMNS; col++) {
+                ctx.fillStyle = c[(row%2+col%2)%2];            
+                // (x, y, width, height)
+                ctx.fillRect(TETRIS.TILE_SIZE*col, TETRIS.TILE_SIZE*row, 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);                
+                ctx.strokeRect(TETRIS.TILE_SIZE*col, TETRIS.TILE_SIZE*row, 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);
+            }
+        }
+    }
+    
+    var initTiles = function() {
+        // I
+        tiles[0] = [
+            [[0,0,0,0],
+             [1,1,1,1],
+             [0,0,0,0],
+             [0,0,0,0]],
+            [[0,1,0,0],
+             [0,1,0,0],
+             [0,1,0,0],
+             [0,1,0,0]]        
+        ];
+        // Cyan
+        colors[0] = '#00FFFF';
+        
+        // T
+        tiles[1] = [
+            [[0,0,0,0],
+             [1,1,1,0],
+             [0,1,0,0],
+             [0,0,0,0]],
+            [[0,1,0,0],
+             [1,1,0,0],
+             [0,1,0,0],
+             [0,0,0,0]],
+            [[0,1,0,0],
+             [1,1,1,0],
+             [0,0,0,0],
+             [0,0,0,0]],
+            [[0,1,0,0],
+             [0,1,1,0],
+             [0,1,0,0],
+             [0,0,0,0]]            
+        ];
+        // Purple
+        colors[1] = '#AA00FF';
+
+        // L
+        tiles[2] = [
+            [[0,0,0,0],
+             [1,1,1,0],
+             [1,0,0,0],
+             [0,0,0,0]],
+            [[1,1,0,0],
+             [0,1,0,0],
+             [0,1,0,0],
+             [0,0,0,0]],
+            [[0,0,1,0],
+             [1,1,1,0],
+             [0,0,0,0],
+             [0,0,0,0]],
+            [[0,1,0,0],
+             [0,1,0,0],
+             [0,1,1,0],
+             [0,0,0,0]]            
+        ];
+        // Orange
+        colors[2] = '#FFA500';
+
+        // J
+        tiles[3] = [
+            [[1,0,0,0],
+             [1,1,1,0],
+             [0,0,0,0],
+             [0,0,0,0]],
+            [[0,1,1,0],
+             [0,1,0,0],
+             [0,1,0,0],
+             [0,0,0,0]],
+            [[0,0,0,0],
+             [1,1,1,0],
+             [0,0,1,0],
+             [0,0,0,0]],
+            [[0,1,0,0],
+             [0,1,0,0],
+             [1,1,0,0],
+             [0,0,0,0]]            
+        ];
+        // Blue
+        colors[3] = '#0000FF';
+
+        // Z
+        tiles[4] = [
+            [[0,0,0,0],
+             [1,1,0,0],
+             [0,1,1,0],
+             [0,0,0,0]],
+            [[0,0,1,0],
+             [0,1,1,0],
+             [0,1,0,0],
+             [0,0,0,0]]
+        ];
+        // Red
+        colors[4] = '#FF0000';
+
+        // S
+        tiles[5] = [
+            [[0,0,0,0],
+             [0,1,1,0],
+             [1,1,0,0],
+             [0,0,0,0]],
+            [[0,1,0,0],
+             [0,1,1,0],
+             [0,0,1,0],
+             [0,0,0,0]]
+        ];
+        // Green
+        colors[5] = '#00FF00';        
+        
+        // O
+        tiles[6] = [
+            [[0,1,1,0],
+             [0,1,1,0],
+             [0,0,0,0],
+             [0,0,0,0]]
+        ];
+        // Yellow
+        colors[6] = '#FFFF00';        
+    };
+    
+    // Generates a random tetronimo to be placed on game field
+    var generateTile = function() {
+        currentTile = nextTile || Math.floor(Math.random() * tiles.length);
+        nextTile = Math.floor(Math.random() * tiles.length);
+        currentRotation = 0;
+        tRow = 0;
+        // Check if shape have empty first row        
+        if (tiles[currentTile][currentRotation][0].indexOf(1) == -1) {
+            tRow = -1;
+        }        
+        tCol = 3;  // Center on game field
+        
+        if (! canFit(tRow, tCol, currentRotation)) {
+            $('#info').html('GAME OVER!');
+            gameOver = true;
+        }
+    };
+    
+    var drawNextTile = function() {
+        var ct = nextTile;
+        var row = 0;
+        // Check if shape have empty first row        
+        if (tiles[ct][0][0].indexOf(1) == -1) {
+            row = -1;
+        } 
+        for (var i=0; i<tiles[ct][0].length; i++) {
+            for (var j=0; j<tiles[ct][0][i].length; j++) {
+                if (tiles[ct][0][i][j] == 1) {
+                    ctx.fillStyle = colors[ct];
+                    ctx.fillRect(TETRIS.TILE_SIZE*(j+1) + TETRIS.WIDTH, TETRIS.TILE_SIZE*(i+row), 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);                
+                    ctx.strokeRect(TETRIS.TILE_SIZE*(j+1) + TETRIS.WIDTH, TETRIS.TILE_SIZE*(i+row), 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);
+                }
+            }
+        }
+    };
+    
+    var drawTile = function() {
+        var ct = currentTile;
+        for (var i=0; i<tiles[ct][currentRotation].length; i++) {
+            for (var j=0; j<tiles[ct][currentRotation][i].length; j++) {
+                if (tiles[ct][currentRotation][i][j] == 1) {
+                    ctx.fillStyle = colors[ct];                           
+                    ctx.fillRect(TETRIS.TILE_SIZE*(j+tCol), TETRIS.TILE_SIZE*(i+tRow), 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);                
+                    ctx.strokeRect(TETRIS.TILE_SIZE*(j+tCol), TETRIS.TILE_SIZE*(i+tRow), 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);
+                }
+            }
+        }
+    };
+    
+    // Check if any part of tile is outside game field 
+    // or hits another tetronimo.
+    var canFit = function(row, col, side) {
+        var ct = currentTile;
+        for (var i=0; i<tiles[ct][side].length; i++) {
+            for (var j=0; j<tiles[ct][side][i].length; j++) {
+                if (tiles[ct][side][i][j] == 1) {
+                    // Out of left side
+                    if (col+j<0) {
+                        return false;
+                    }
+                    // Out of right side                    
+                    if (col+j>9) {
+                        return false;
+                    }
+                    // Bottom
+                    if (row+i>19) {
+                        return false;
+                    }
+                    // Another tetronimo
+                    if (field[row+i][col+j] > -1) {
+                        return false;
+                    }
+                }
+            }
+        }
+        // Ok! No part outside
+        return true;
+    };
+    
+    var landTile = function() {
+        var ct = currentTile;
+        for (var i=0; i<tiles[ct][currentRotation].length; i++) {
+            for (var j=0; j<tiles[ct][currentRotation][i].length; j++) {
+                if (tiles[ct][currentRotation][i][j] == 1) {
+                    field[tRow+i][tCol+j] = ct;
+                }
+            }
+        }
+        
+        checkCompletedLines();
+    };
+    
+    var checkCompletedLines = function() {
+        for (var i=0; i<TETRIS.ROWS; i++) {
+            // If we find a row that contains no -1 that is a completed row
+            if (field[i].indexOf(-1) == -1) {
+                for (var j=0; j<TETRIS.COLUMNS; j++) {
+                    // Empty
+                    field[i][j] = -1;
+                }
+                // Pull all rows above this one down one notch
+                for (var j=(i-1); j>=0; j--) {
+                    for (var k=0; k<TETRIS.COLUMNS; k++) {
+                        var temp = field[j][k];
+                        field[j][k] = -1;
+                        field[j+1][k] = temp;
+                    }
+                }
+            }
+        }
+    };
+    
+    // Draws all landed tetronimos 
+    var drawField = function() {
+        for (var row=0; row<TETRIS.ROWS; row++) {
+            for (var col=0; col<TETRIS.COLUMNS; col++) {
+                var current = field[row][col];
+                if (current != -1) {
+                    // !TODO Put in draw method
+                    ctx.fillStyle = colors[current];                           
+                    ctx.fillRect(TETRIS.TILE_SIZE*col, TETRIS.TILE_SIZE*row, 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);                
+                    ctx.strokeRect(TETRIS.TILE_SIZE*col, TETRIS.TILE_SIZE*row, 
+                                TETRIS.TILE_SIZE, TETRIS.TILE_SIZE);                    
+                }
+            }
+        }
+    
+    };
+    
+    var update = function() {
+        input.update();
+        
+        if (! gameOver) {
+            if (input.buttons[input.BUTTON_LEFT]) {
+                // Check first if tile fits in new position
+                if (canFit(tRow, tCol-1, currentRotation)) {
+                    tCol--;
+                }
+            } else if(input.buttons[input.BUTTON_RIGHT]) {
+                if (canFit(tRow, tCol+1, currentRotation)) {
+                    tCol++;
+                }
+            } else if(input.buttons[input.BUTTON_DOWN]) {
+                dropTile();
+            } else if(input.buttons[input.BUTTON_UP]) {
+                var ct = currentRotation;
+                // Restart at 1 if more than rotations available
+                // Example (3+1) % 3 = 1 since 4/3 = 3 + 1
+                var rot = (ct+1) % tiles[currentTile].length;
+                if (canFit(tRow+1, tCol, rot)) {
+                    currentRotation = rot;
+                }
+            }
+            
+            var now = Date.now();
+            if (now - lastDrop > TETRIS.DROPRATE) {
+                lastDrop = now;
+                dropTile();
+            }
+        }
+    };
+    
+    var dropTile = function() {
+        if (canFit(tRow+1, tCol, currentRotation)) {
+            tRow++;
+        } else {
+            landTile();
+            generateTile();
+        }
+    };
+
+    // Clears game field, then draw all objects    
+    var draw = function() {
+        ctx.clearRect(0, 0, width, height);    
+        drawGrid();
+        drawTile();
+        drawNextTile();
+        drawField();    
+    };
+    
+    $('#info').empty();
+    initTiles();
+    generateTile();
+    
+    setInterval(function() {
+        update();
+        draw();
+    }, 1000/10);
+});
+</script>
+    </head>
+    <body>
+        <pre>Tetris! <span id="info"></span></pre>
+        <canvas id="canvas"></canvas>
+    </body>
+</html>
